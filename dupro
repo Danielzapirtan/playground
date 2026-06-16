@@ -1,0 +1,15 @@
+#! /bin/bash
+
+old=$1
+new="$1-dev"
+myacc=Danielzapirtan
+
+cd $HOME/git-client
+rm -rf $old $new
+gh repo create $new --public
+git clone https://github.com/$myacc/$old.git
+cp -a $old $new
+cd $new
+git remote set-url origin https://github.com/$myacc/$new.git
+git push -u origin main
+
