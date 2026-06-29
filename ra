@@ -1,0 +1,39 @@
+#!/bin/bash
+# Save as ~/bin/audit-repos && chmod +x ~/bin/audit-repos
+
+SEARCH_PATH="${1:-$HOME/code}"
+
+echo "🔍 REPO AUDIT — $(date)"
+echo "========================================"
+
+find "$SEARCH_PATH" -maxdepth 3 -name ".git" -type d | while read gitdir; do
+    repo_dir=$(dirname "$gitdir")
+    cd "$repo_dir" || continue
+    
+    name=$(basename "$repo_dir")
+    commits=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+    last_change=$(git log -1 --format=%cr 2>/dev/null || echo "never")
+    branches=$(git branch -a 2>/dev/null | wc -l | xargs)
+    modified=$(git status --porcelain 2>/dev/null | wc -l | xargs)
+    remote=$(git remote get-url origin 2>/dev/null | sed 's/.*\///' | sed 's/\.git$//' || echo "❌ no remote")
+    
+    # Suggestion logic
+    if [[ $commits -eq 0 ]]; then
+        action="🔴 DELETE — Empty repo (0 commits)"
+    elif [[ $modified -gt 0 ]]; then
+        action="🟡 REVIEW — $modified uncommitted files"
+    elif [[ "$last_change" == *"year"* ]] || [[ "$last_change" == *"years"* ]]; then
+        action="🟡 ARCHIVE — Last change $last_change"
+    elif [[ $remote == "❌ no remote" ]]; then
+        action="🟡 FIX — No remote set"
+    elif [[ $branches -gt 5 ]]; then
+        action="🟢 KEEP — Active ($branches branches)"
+    else
+        action="🟢 KEEP — Healthy"
+    fi
+    
+    echo "$action | 📁 $name | 📝 $commits commits | ⏱ $last_change"
+done | sort
+
+echo "========================================"
+echo "💡 Legend: 🔴 DELETE  🟡 ARCHIVE/FIX  🟢 KEEP"
