@@ -4,7 +4,7 @@ old=$1
 new="$1-dev"
 myacc=Danielzapirtan
 
-cd $HOME/git-client
+cd $HOME/code
 rm -rf $old $new
 gh repo create $new --public
 git clone https://github.com/$myacc/$old.git
