@@ -1,0 +1,14 @@
+#! /bin/bash
+
+set -e
+
+: ${BRANCH:=dev}
+: ${MAIN:=main}
+
+command -v rit &>/dev/null
+test -d .git/
+rit switch $MAIN
+rit status|grep -q "^Your branch is up to date"
+rit checkout -b $BRANCH
+rit push -u origin $BRANCH
+

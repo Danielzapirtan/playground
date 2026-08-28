@@ -1,5 +1,10 @@
 #! /bin/bash
 
-git add .
-git commit -m "$(date)"
-git push
+DATE=$(date +%s%N)
+DIR=code
+MONTH=$(date +%y%m)
+TARGETDIR=/var/backups/code/
+
+cd $HOME
+mkdir -p $TARGETDIR
+tar -C /root -X /root/code/.exclude.txt -czf $TARGETDIR/code_$DATE.tar.gz code
