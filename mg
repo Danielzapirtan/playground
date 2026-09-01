@@ -4,8 +4,8 @@ set -e
 
 cat $0
 
-: ${BRANCH:=wb}
-: ${MAIN:=dev}
+: ${BRANCH:=extend}
+: ${MAIN:=main}
 : ${TARGET:=$MAIN}
 
 rit switch $BRANCH

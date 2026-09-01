@@ -1,10 +1,15 @@
 #! /bin/bash
 
-DATE=$(date +%s%N)
-DIR=code
-MONTH=$(date +%y%m)
+PATH=/usr/bin:/bin
+DATE=$(date +%Y%m%d%H%M%S%N)
+EXCLUDE=/home/daniel/code/.exclude.txt
 TARGETDIR=/var/backups/code/
 
-cd $HOME
+cd /home/daniel
 mkdir -p $TARGETDIR
-tar -C /root -X /root/code/.exclude.txt -czf $TARGETDIR/code_$DATE.tar.gz code
+: >$EXCLUDE
+for d in "venv" ".venv" ".git"; do
+  find code -type d -iname $d >>$EXCLUDE
+done
+
+sudo tar -C /home/daniel -X $EXCLUDE -czf $TARGETDIR/code_$DATE.tar.gz code

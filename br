@@ -1,11 +1,13 @@
 #! /bin/bash
 
+PATH=/usr/local/bin:/usr/bin:/bin
+
 set -e
 
 : ${BRANCH:=dev}
 : ${MAIN:=main}
 
-command -v rit &>/dev/null
+command -v rit
 test -d .git/
 rit switch $MAIN
 rit status|grep -q "^Your branch is up to date"

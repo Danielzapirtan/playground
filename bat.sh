@@ -1,16 +1,20 @@
 #! /bin/bash
 
-BAT=$(/usr/bin/cat /sys/class/power_supply/BAT0/capacity)
-case $BAT in
-20)
-	/usr/bin/echo disk >/sys/power/state
+PATH=/usr/local/bin:/usr/bin:/bin
+BATDIR=/sys/class/power_supply/BAT0
+CAP=$(cat $BATDIR/capacity)
+STATUS=$(cat $BATDIR/status)
+
+echo "$(date +%Y%m%d_%H%M%S) $CAP $STATUS" | sudo tee -a /var/log/bat.log
+case $CAP in
+11)
+	echo $STATUS | grep -q "^Discharging$" && sudo hib
 	;;
 95)
-	/usr/bin/echo disk >/sys/power/state
+	echo $STATUS | grep -q "^Charging$" && sudo hib
 	;;
 *)
-	/usr/bin/date
-	/usr/bin/echo "${BAT}%"
+	date
+	echo "${CAP}%"
 	;;
 esac
-
