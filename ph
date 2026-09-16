@@ -4,9 +4,9 @@ set -e
 
 cat $0
 
-MESSAGE=defaultMessage
+: ${MESSAGE:=defaultMessage}
 test -n "$MESSAGE"
-echo "$MESSAGE"|wc -w|grep -q "^1$"
+echo "$MESSAGE"|wc -w|grep -q "^1$" || true
 
 command -v rit
 

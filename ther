@@ -1,0 +1,16 @@
+#! /bin/bash
+
+LOG=/var/log/ther.log
+prog=adzchess
+
+date +%Y%m%d-%H%M >>$LOG
+for zone in 6 8; do
+  temp=$(cat /sys/class/thermal/thermal_zone$zone/temp)
+  echo $temp
+  if [ $temp -ge 83000 ]; then
+    pkill -stop $prog
+  else
+    pkill -cont $prog
+  fi
+done >>$LOG
+

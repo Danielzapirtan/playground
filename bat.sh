@@ -10,9 +10,6 @@ case $CAP in
 11)
 	echo $STATUS | grep -q "^Discharging$" && sudo hib
 	;;
-95)
-	echo $STATUS | grep -q "^Charging$" && sudo hib
-	;;
 *)
 	date
 	echo "${CAP}%"

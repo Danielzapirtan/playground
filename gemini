@@ -1,0 +1,503 @@
+#!/usr/bin/env bash
+
+# Gemini API Client for Linux (Ubuntu 26.04)
+# Uses free tier quotas (as of 2024)
+
+set -euo pipefail
+
+# Configuration
+API_KEY=""  # Set your API key here or export GEMINI_API_KEY
+MODEL="gemini-3.1-flash-lite"  # Free tier model
+MAX_TOKENS=2048
+TEMPERATURE=0.7
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Configuration file path
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gemini-cli"
+CONFIG_FILE="$CONFIG_DIR/config"
+HISTORY_FILE="$CONFIG_DIR/history"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/gemini-cli"
+
+# Function to display usage
+show_usage() {
+    cat << EOF
+${GREEN}╔════════════════════════════════════════╗
+║   Gemini API Client for Linux        ║
+╚════════════════════════════════════════╝${NC}
+
+${YELLOW}Usage:${NC}
+    gemini [OPTIONS] "Your prompt here"
+    echo "Your prompt" | gemini [OPTIONS]
+    cat file.txt | gemini [OPTIONS]
+
+${YELLOW}Options:${NC}
+    -k, --api-key KEY      Set Gemini API key
+    -m, --model MODEL      Set model (default: $MODEL)
+                          Available: gemini-1.5-flash, gemini-1.5-pro, gemini-1.0-pro
+    -t, --temperature VAL  Set temperature 0-2 (default: $TEMPERATURE)
+    -x, --max-tokens NUM   Set max output tokens (default: $MAX_TOKENS)
+    -s, --system PROMPT    Set system instruction
+    -c, --chat            Start interactive chat mode
+    --history             Show chat history
+    --clear-history       Clear chat history
+    -f, --file FILE       Read prompt from file
+    -o, --output FILE     Save response to file
+    --json                Output in JSON format
+    --no-color            Disable colored output
+    --save-config         Save current settings as default
+    --show-config         Display current configuration
+    -h, --help            Show this help
+    -v, --version         Show version information
+
+${YELLOW}Free Tier Limits (gemini-1.5-flash):${NC}
+    ${CYAN}• 15 requests per minute
+    • 1,500 requests per day (as of 2024)
+    • 1 million tokens per minute${NC}
+
+${YELLOW}Setup:${NC}
+    1. Get API key from ${CYAN}https://aistudio.google.com/apikey${NC}
+    2. Run: ${CYAN}gemini --api-key YOUR_KEY --save-config${NC}
+    3. Or add to ~/.bashrc: ${CYAN}export GEMINI_API_KEY="YOUR_KEY"${NC}
+
+${YELLOW}Examples:${NC}
+    ${CYAN}gemini "What is quantum computing?"
+    echo "Write a poem" | gemini -t 0.9
+    gemini -s "Be a chef" "Recipe for pasta"
+    gemini --chat
+    gemini -f prompt.txt -o response.txt${NC}
+EOF
+}
+
+# Function to check dependencies
+check_dependencies() {
+    local missing_deps=()
+    
+    for dep in curl jq; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        echo -e "${RED}Error: Missing required dependencies: ${missing_deps[*]}${NC}"
+        echo -e "${YELLOW}Install with: sudo apt install ${missing_deps[*]}${NC}"
+        exit 1
+    fi
+}
+
+# Function to setup directories
+setup_directories() {
+    mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
+    chmod 700 "$CONFIG_DIR"
+}
+
+# Function to load config
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+    
+    # Environment variable overrides config file
+    if [ -n "${GEMINI_API_KEY:-}" ]; then
+        API_KEY="$GEMINI_API_KEY"
+    fi
+}
+
+# Function to save config
+save_config() {
+    setup_directories
+    cat > "$CONFIG_FILE" << EOF
+# Gemini API Configuration
+# Generated on $(date)
+API_KEY="$API_KEY"
+MODEL="$MODEL"
+TEMPERATURE="$TEMPERATURE"
+MAX_TOKENS="$MAX_TOKENS"
+EOF
+    chmod 600 "$CONFIG_FILE"
+    echo -e "${GREEN}✓ Configuration saved to $CONFIG_FILE${NC}"
+}
+
+# Function to show config
+show_config() {
+    load_config
+    echo -e "${GREEN}Current Configuration:${NC}"
+    echo -e "  ${YELLOW}Model:${NC}       $MODEL"
+    echo -e "  ${YELLOW}Temperature:${NC} $TEMPERATURE"
+    echo -e "  ${YELLOW}Max Tokens:${NC}  $MAX_TOKENS"
+    echo -e "  ${YELLOW}API Key:${NC}     ${API_KEY:0:8}...${API_KEY: -4}"
+}
+
+# Function to validate API key
+validate_api_key() {
+    if [ -z "$API_KEY" ]; then
+        echo -e "${RED}Error: API key not set.${NC}"
+        echo -e "Get one from: ${CYAN}https://aistudio.google.com/apikey${NC}"
+        echo -e "Then run: ${CYAN}gemini --api-key YOUR_KEY --save-config${NC}"
+        exit 1
+    fi
+}
+
+# Function to escape JSON string
+escape_json() {
+    echo "$1" | jq -R -s '.'
+}
+
+# Function to make API request
+make_request() {
+    local prompt="$1"
+    local system_instruction="$2"
+    
+    # Escape special characters for JSON
+    local escaped_prompt
+    escaped_prompt=$(escape_json "$prompt")
+    
+    local json_payload
+    
+    if [ -n "$system_instruction" ]; then
+        local escaped_system
+        escaped_system=$(escape_json "$system_instruction")
+        
+        json_payload=$(cat <<EOF
+{
+  "contents": [{
+    "parts": [{
+      "text": $escaped_prompt
+    }]
+  }],
+  "systemInstruction": {
+    "parts": [{
+      "text": $escaped_system
+    }]
+  },
+  "generationConfig": {
+    "temperature": $TEMPERATURE,
+    "maxOutputTokens": $MAX_TOKENS,
+    "topP": 0.95,
+    "topK": 40
+  }
+}
+EOF
+)
+    else
+        json_payload=$(cat <<EOF
+{
+  "contents": [{
+    "parts": [{
+      "text": $escaped_prompt
+    }]
+  }],
+  "generationConfig": {
+    "temperature": $TEMPERATURE,
+    "maxOutputTokens": $MAX_TOKENS,
+    "topP": 0.95,
+    "topK": 40
+  },
+  "safetySettings": [
+    {
+      "category": "HARM_CATEGORY_HARASSMENT",
+      "threshold": "BLOCK_NONE"
+    },
+    {
+      "category": "HARM_CATEGORY_HATE_SPEECH",
+      "threshold": "BLOCK_NONE"
+    }
+  ]
+}
+EOF
+)
+    fi
+    
+    # Create a temporary file for the response
+    local temp_response
+    temp_response=$(mktemp "$CACHE_DIR/gemini-response-XXXXXX")
+    
+    # Make API call with progress indicator
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o "$temp_response" \
+        --connect-timeout 10 \
+        --max-time 60 \
+        "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}" \
+        -H 'Content-Type: application/json' \
+        -d "$json_payload" 2>/dev/null || echo "000")
+    
+    # Handle response
+    if [ "$http_code" = "200" ]; then
+        if [ "$OUTPUT_JSON" = true ]; then
+            cat "$temp_response"
+        elif command -v jq &> /dev/null; then
+            jq -r '.candidates[0].content.parts[0].text // "No response generated"' "$temp_response" 2>/dev/null
+        else
+            # Fallback without jq
+            grep -o '"text"[[:space:]]*:[[:space:]]*"[^"]*"' "$temp_response" | head -1 | \
+                sed 's/"text"[[:space:]]*:[[:space:]]*"//;s/"$//' | \
+                sed 's/\\n/\n/g; s/\\"/"/g; s/\\\\/\\/g'
+        fi
+        rm -f "$temp_response"
+        return 0
+    elif [ "$http_code" = "429" ]; then
+        echo -e "${RED}Error: Rate limit exceeded. Please wait before making more requests.${NC}" >&2
+        echo -e "${YELLOW}Free tier: 15 requests/minute, 1,500 requests/day${NC}" >&2
+        rm -f "$temp_response"
+        return 1
+    elif [ "$http_code" = "400" ]; then
+        echo -e "${RED}Error: Bad request. Check your input.${NC}" >&2
+        jq '.' "$temp_response" 2>/dev/null || cat "$temp_response"
+        rm -f "$temp_response"
+        return 1
+    elif [ "$http_code" = "403" ]; then
+        echo -e "${RED}Error: Invalid API key or permission denied.${NC}" >&2
+        rm -f "$temp_response"
+        return 1
+    else
+        echo -e "${RED}Error: API request failed with HTTP status $http_code${NC}" >&2
+        jq '.' "$temp_response" 2>/dev/null || cat "$temp_response"
+        rm -f "$temp_response"
+        return 1
+    fi
+}
+
+# Function for interactive chat mode
+chat_mode() {
+    echo -e "${GREEN}╔════════════════════════════════════════╗"
+    echo -e "║     Gemini Interactive Chat          ║"
+    echo -e "╚════════════════════════════════════════╝${NC}"
+    echo -e "${YELLOW}Commands: 'exit' to quit, 'clear' to clear screen,"
+    echo -e "         'history' to show chat, 'save' to save chat${NC}\n"
+    
+    # Initialize chat history array
+    declare -a chat_history
+    local chat_start_time
+    chat_start_time=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Save session to history file
+    echo "=== Chat Session: $chat_start_time ===" >> "$HISTORY_FILE"
+    
+    while true; do
+        # Show prompt
+        echo -ne "${BLUE}You${NC} ${YELLOW}❯${NC} "
+        read -r user_input
+        
+        case "${user_input,,}" in
+            exit|quit)
+                echo -e "${GREEN}Goodbye! Chat saved to history.${NC}"
+                echo "=== End Session ===" >> "$HISTORY_FILE"
+                break
+                ;;
+            clear)
+                clear
+                chat_history=()
+                echo -e "${GREEN}Chat cleared${NC}"
+                continue
+                ;;
+            history)
+                echo -e "${YELLOW}Chat History:${NC}"
+                for i in "${!chat_history[@]}"; do
+                    echo "${chat_history[$i]}"
+                done
+                echo ""
+                continue
+                ;;
+            save)
+                local save_file="$HOME/gemini-chat-$(date +%Y%m%d-%H%M%S).txt"
+                printf '%s\n' "${chat_history[@]}" > "$save_file"
+                echo -e "${GREEN}Chat saved to $save_file${NC}"
+                continue
+                ;;
+            "")
+                continue
+                ;;
+        esac
+        
+        # Build context from history (last 10 exchanges to manage tokens)
+        local context=""
+        local history_limit=10
+        local start_idx=$((${#chat_history[@]} - history_limit * 2))
+        [ $start_idx -lt 0 ] && start_idx=0
+        
+        for ((i=start_idx; i<${#chat_history[@]}; i++)); do
+            context="${context}${chat_history[$i]}\n"
+        done
+        local full_prompt="${context}User: ${user_input}\nAssistant:"
+        
+        # Show typing indicator
+        echo -ne "${GREEN}Gemini${NC} ${CYAN}❯${NC} "
+        
+        local response
+        if response=$(make_request "$full_prompt" ""); then
+            echo -e "$response\n"
+            chat_history+=("User: $user_input")
+            chat_history+=("Assistant: $response")
+            
+            # Save to history file
+            echo "User: $user_input" >> "$HISTORY_FILE"
+            echo "Assistant: $response" >> "$HISTORY_FILE"
+        fi
+    done
+}
+
+# Function to check for updates
+check_updates() {
+    local update_file="$CACHE_DIR/.last_update_check"
+    local current_time
+    current_time=$(date +%s)
+    local last_check=0
+    
+    if [ -f "$update_file" ]; then
+        last_check=$(cat "$update_file")
+    fi
+    
+    # Check once per day
+    if [ $((current_time - last_check)) -gt 86400 ]; then
+        echo -e "${YELLOW}Tip: Check for new Gemini models at https://ai.google.dev/gemini-api/docs/models${NC}"
+        echo "$current_time" > "$update_file"
+    fi
+}
+
+# Main script
+main() {
+    # Parse arguments
+    SYSTEM_PROMPT=""
+    INTERACTIVE=false
+    PROMPT=""
+    INPUT_FILE=""
+    OUTPUT_FILE=""
+    OUTPUT_JSON=false
+    NO_COLOR=false
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -k|--api-key)
+                API_KEY="$2"
+                shift 2
+                ;;
+            -m|--model)
+                MODEL="$2"
+                shift 2
+                ;;
+            -t|--temperature)
+                TEMPERATURE="$2"
+                shift 2
+                ;;
+            -x|--max-tokens)
+                MAX_TOKENS="$2"
+                shift 2
+                ;;
+            -s|--system)
+                SYSTEM_PROMPT="$2"
+                shift 2
+                ;;
+            -c|--chat)
+                INTERACTIVE=true
+                shift
+                ;;
+            -f|--file)
+                INPUT_FILE="$2"
+                shift 2
+                ;;
+            -o|--output)
+                OUTPUT_FILE="$2"
+                shift 2
+                ;;
+            --json)
+                OUTPUT_JSON=true
+                shift
+                ;;
+            --no-color)
+                NO_COLOR=true
+                RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+                shift
+                ;;
+            --save-config)
+                save_config
+                exit 0
+                ;;
+            --show-config)
+                show_config
+                exit 0
+                ;;
+            --history)
+                if [ -f "$HISTORY_FILE" ]; then
+                    less "$HISTORY_FILE"
+                else
+                    echo -e "${YELLOW}No chat history found.${NC}"
+                fi
+                exit 0
+                ;;
+            --clear-history)
+                rm -f "$HISTORY_FILE"
+                echo -e "${GREEN}Chat history cleared.${NC}"
+                exit 0
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            -v|--version)
+                echo "Gemini CLI v1.2.0"
+                echo "Ubuntu 26.04 Compatible"
+                exit 0
+                ;;
+            -*)
+                echo -e "${RED}Unknown option: $1${NC}"
+                show_usage
+                exit 1
+                ;;
+            *)
+                PROMPT="$1"
+                shift
+                ;;
+        esac
+    done
+    
+    # Setup
+    check_dependencies
+    setup_directories
+    load_config
+    validate_api_key
+    check_updates
+    
+    # Interactive chat mode
+    if [ "$INTERACTIVE" = true ]; then
+        chat_mode
+        exit 0
+    fi
+    
+    # Read from file if specified
+    if [ -n "$INPUT_FILE" ]; then
+        if [ -f "$INPUT_FILE" ]; then
+            PROMPT=$(<"$INPUT_FILE")
+        else
+            echo -e "${RED}Error: File not found: $INPUT_FILE${NC}"
+            exit 1
+        fi
+    fi
+    
+    # Read from stdin if no prompt provided
+    if [ -z "$PROMPT" ]; then
+        if [ ! -t 0 ]; then
+            PROMPT=$(cat)
+        else
+            echo -e "${RED}Error: No prompt provided${NC}"
+            show_usage
+            exit 1
+        fi
+    fi
+    
+    # Make request
+    if [ -n "$OUTPUT_FILE" ]; then
+        make_request "$PROMPT" "$SYSTEM_PROMPT" | tee "$OUTPUT_FILE"
+    else
+        make_request "$PROMPT" "$SYSTEM_PROMPT"
+    fi
+}
+
+# Run main function
+main "$@"
