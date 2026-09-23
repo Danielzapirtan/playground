@@ -2,6 +2,7 @@
 
 PATH=/usr/local/bin:/usr/bin:/bin
 BATDIR=/sys/class/power_supply/BAT0
+test -d $BATDIR || exit 0
 CAP=$(cat $BATDIR/capacity)
 STATUS=$(cat $BATDIR/status)
 
