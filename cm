@@ -1,15 +1,18 @@
-#! /bin/bash
+#! /usr/bin/bash
 
 PATH=/usr/bin:/bin
-DATE=$(date +%Y%m%d%H%M%S%N)
-EXCLUDE=/home/daniel/code/.exclude.txt
-TARGETDIR=/var/backups/code/
+DATE=$(date +%Y%m%d_%H%M%S)
+DIR=..
+PROJECT=$(basename $PWD)
+EXCLUDE=$PROJECT/.exclude.txt
+TARGETDIR=/var/backups/code/$PROJECT
+TARGET=$TARGETDIR/${PROJECT}_$DATE.tar.gz
 
-cd /home/daniel
-mkdir -p $TARGETDIR
+cd $DIR
 : >$EXCLUDE
 for d in "venv" ".venv" ".git"; do
-  find code -type d -iname $d >>$EXCLUDE
+  find $PROJECT -type d -iname $d >>$EXCLUDE
 done
 
-sudo tar -C /home/daniel -X $EXCLUDE -czf $TARGETDIR/code_$DATE.tar.gz code
+sudo mkdir -p $TARGETDIR
+sudo tar -C . -X $EXCLUDE -czf $TARGET $PROJECT
