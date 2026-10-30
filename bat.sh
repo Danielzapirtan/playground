@@ -8,7 +8,7 @@ STATUS=$(cat $BATDIR/status)
 
 echo "$(date +%Y%m%d_%H%M%S) $CAP $STATUS" | sudo tee -a /var/log/bat.log
 case $CAP in
-11)
+1?)
 	echo $STATUS | grep -q "^Discharging$" && sudo hib
 	;;
 *)
