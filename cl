@@ -1,6 +1,6 @@
 #! /bin/bash
 
-PATH=/usr/local/sbin:/usr/bin:/bin
+PATH=$HOME/.local/bin:/usr/bin:/bin
 
 set -e
 
